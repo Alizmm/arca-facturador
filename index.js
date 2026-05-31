@@ -82,7 +82,7 @@ async function obtenerToken() {
   const token = xml.match(/<token>([^<]+)<\/token>/)?.[1];
   const sign  = xml.match(/<sign>([^<]+)<\/sign>/)?.[1];
 
-  if (!token) throw new Error("No se pudo obtener token. Respuesta: " + xml.substring(0, 2000));
+  if (!token) throw new Error("No se pudo obtener token. Respuesta completa: " + xml);
 
   cachedToken = token;
   cachedSign  = sign;
@@ -173,6 +173,7 @@ app.post("/emitir", async (req, res) => {
   </soapenv:Body>
 </soapenv:Envelope>`;
 
+    console.log("TRA firmado:", firma.substring(0, 100));
     const resp = await axios.post(WSFE_URL, soap, {
       headers: {
         "Content-Type": "text/xml; charset=utf-8",
