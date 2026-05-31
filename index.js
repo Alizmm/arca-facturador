@@ -3,27 +3,36 @@ const forge = require("node-forge");
 const axios = require("axios");
 const app = express();
 app.use(express.json());
-
-// ── Configuración ──────────────────────────────────────────
-const CUIT = process.env.CUIT || "27303744172";
+ 
+const CUIT     = process.env.CUIT || "27303744172";
 const CERT_B64 = process.env.CERT_B64 || "";
 const KEY_B64  = process.env.KEY_B64  || "";
 const WSAA_URL = "https://wsaa.afip.gov.ar/ws/services/LoginCms";
 const WSFE_URL = "https://servicios1.afip.gov.ar/wsfev1/service.asmx";
-
-// Cache del token en memoria
+ 
 let cachedToken = null;
 let cachedSign  = null;
 let tokenExpira = null;
-
-// ── Firmar CMS con node-forge ──────────────────────────────
+ 
+function getPem(b64) {
+  // Decodifica el base64 y devuelve el string PEM
+  const decoded = Buffer.from(b64, "base64").toString("utf8");
+  // Si ya tiene encabezado PEM, lo devuelve directo
+  if (decoded.includes("-----BEGIN")) return decoded;
+  // Si no, lo envuelve (no debería pasar pero por las dudas)
+  return decoded;
+}
+ 
 function firmarTRA(traXml) {
-  const certPem = Buffer.from(CERT_B64, "base64").toString("utf8");
-  const keyPem  = Buffer.from(KEY_B64,  "base64").toString("utf8");
-
+  const certPem = getPem(CERT_B64);
+  const keyPem  = getPem(KEY_B64);
+ 
+  console.log("CERT empieza con:", certPem.substring(0, 30));
+  console.log("KEY empieza con:",  keyPem.substring(0, 30));
+ 
   const cert    = forge.pki.certificateFromPem(certPem);
   const privKey = forge.pki.privateKeyFromPem(keyPem);
-
+ 
   const p7 = forge.pkcs7.createSignedData();
   p7.content = forge.util.createBuffer(traXml, "utf8");
   p7.addCertificate(cert);
@@ -38,21 +47,20 @@ function firmarTRA(traXml) {
     ]
   });
   p7.sign();
-
+ 
   const der = forge.asn1.toDer(p7.toAsn1()).getBytes();
   return Buffer.from(der, "binary").toString("base64");
 }
-
-// ── Obtener token WSAA ─────────────────────────────────────
+ 
 async function obtenerToken() {
   const ahora = new Date();
   if (cachedToken && tokenExpira && ahora < tokenExpira) {
     return { token: cachedToken, sign: cachedSign };
   }
-
+ 
   const expira   = new Date(ahora.getTime() + 10 * 60 * 1000);
   const uniqueId = Math.floor(Math.random() * 1000000);
-
+ 
   const tra = `<?xml version="1.0" encoding="UTF-8"?>
 <loginTicketRequest version="1.0">
   <header>
@@ -62,9 +70,9 @@ async function obtenerToken() {
   </header>
   <service>wsfe</service>
 </loginTicketRequest>`;
-
+ 
   const firma = firmarTRA(tra);
-
+ 
   const soap = `<?xml version="1.0" encoding="UTF-8"?>
 <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:wsaa="http://wsaa.view.sua.dvadac.desein.afip.gov.ar">
   <soapenv:Body>
@@ -73,34 +81,34 @@ async function obtenerToken() {
     </wsaa:loginCms>
   </soapenv:Body>
 </soapenv:Envelope>`;
-
-const resp = await axios.post(WSAA_URL, soap, {
+ 
+  const resp = await axios.post(WSAA_URL, soap, {
     headers: { "Content-Type": "text/xml; charset=utf-8", "SOAPAction": "" },
     validateStatus: () => true
   });
-
+ 
   console.log("Status WSAA:", resp.status);
-  console.log("Respuesta WSAA:", JSON.stringify(resp.data).substring(0, 500));
   const xml = typeof resp.data === "string" ? resp.data : JSON.stringify(resp.data);
+  console.log("Respuesta WSAA:", xml.substring(0, 400));
+ 
   const token = xml.match(/<token>([^<]+)<\/token>/)?.[1];
   const sign  = xml.match(/<sign>([^<]+)<\/sign>/)?.[1];
-
-  if (!token) throw new Error("No se pudo obtener token. Respuesta completa: " + xml);
-
+ 
+  if (!token) throw new Error("No se pudo obtener token. Respuesta: " + xml.substring(0, 500));
+ 
   cachedToken = token;
   cachedSign  = sign;
   tokenExpira = new Date(ahora.getTime() + 9 * 60 * 1000);
-
+ 
   return { token, sign };
 }
-
-// ── Endpoint: consultar último número ─────────────────────
+ 
 app.get("/ultimo-numero", async (req, res) => {
   try {
     const { token, sign } = await obtenerToken();
     const ptoVta   = req.query.ptoVta   || 3;
     const cbteTipo = req.query.cbteTipo || 11;
-
+ 
     const soap = `<?xml version="1.0" encoding="UTF-8"?>
 <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ar="http://ar.gov.afip.dif.FEV1/">
   <soapenv:Body>
@@ -115,29 +123,27 @@ app.get("/ultimo-numero", async (req, res) => {
     </ar:FECompUltimoAutorizado>
   </soapenv:Body>
 </soapenv:Envelope>`;
-
+ 
     const resp = await axios.post(WSFE_URL, soap, {
       headers: {
         "Content-Type": "text/xml; charset=utf-8",
         "SOAPAction": "http://ar.gov.afip.dif.FEV1/FECompUltimoAutorizado"
       }
     });
-
+ 
     const nro = resp.data.match(/<CbteNro>([^<]+)<\/CbteNro>/)?.[1] || "0";
     res.json({ ok: true, ultimoNumero: parseInt(nro) });
   } catch(e) {
     res.status(500).json({ ok: false, error: e.message });
   }
 });
-
-// ── Endpoint: emitir factura ───────────────────────────────
+ 
 app.post("/emitir", async (req, res) => {
   try {
     const { token, sign } = await obtenerToken();
     const { ptoVta, nroComprobante, fecha, docTipo, docNro, total } = req.body;
-
     const fechaStr = fecha.replace(/-/g, "");
-
+ 
     const soap = `<?xml version="1.0" encoding="UTF-8"?>
 <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ar="http://ar.gov.afip.dif.FEV1/">
   <soapenv:Body>
@@ -175,34 +181,30 @@ app.post("/emitir", async (req, res) => {
     </ar:FECAESolicitar>
   </soapenv:Body>
 </soapenv:Envelope>`;
-
-    console.log("TRA firmado:", firma.substring(0, 100));
+ 
     const resp = await axios.post(WSFE_URL, soap, {
       headers: {
         "Content-Type": "text/xml; charset=utf-8",
         "SOAPAction": "http://ar.gov.afip.dif.FEV1/FECAESolicitar"
       }
     });
-
+ 
     const xml       = resp.data;
     const resultado = xml.match(/<Resultado>([^<]+)<\/Resultado>/)?.[1];
-
     if (resultado !== "A") {
       const msg = xml.match(/<Msg>([^<]+)<\/Msg>/)?.[1] || "Error desconocido de ARCA";
       throw new Error(msg);
     }
-
+ 
     const cae    = xml.match(/<CAE>([^<]+)<\/CAE>/)?.[1];
     const vtoCae = xml.match(/<CAEFchVto>([^<]+)<\/CAEFchVto>/)?.[1];
-
     res.json({ ok: true, cae, vtoCae });
   } catch(e) {
     res.status(500).json({ ok: false, error: e.message });
   }
 });
-
-// ── Health check ───────────────────────────────────────────
+ 
 app.get("/", (req, res) => res.json({ status: "Facturador ARCA activo ✅" }));
-
+ 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log("Servidor corriendo en puerto " + PORT));
