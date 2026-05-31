@@ -74,11 +74,14 @@ async function obtenerToken() {
   </soapenv:Body>
 </soapenv:Envelope>`;
 
-  const resp = await axios.post(WSAA_URL, soap, {
-    headers: { "Content-Type": "text/xml; charset=utf-8", "SOAPAction": "" }
+const resp = await axios.post(WSAA_URL, soap, {
+    headers: { "Content-Type": "text/xml; charset=utf-8", "SOAPAction": "" },
+    validateStatus: () => true
   });
 
-  const xml   = resp.data;
+  console.log("Status WSAA:", resp.status);
+  console.log("Respuesta WSAA:", JSON.stringify(resp.data).substring(0, 500));
+  const xml = typeof resp.data === "string" ? resp.data : JSON.stringify(resp.data);
   const token = xml.match(/<token>([^<]+)<\/token>/)?.[1];
   const sign  = xml.match(/<sign>([^<]+)<\/sign>/)?.[1];
 
