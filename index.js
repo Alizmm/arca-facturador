@@ -82,7 +82,7 @@ async function obtenerToken() {
   const token = xml.match(/<token>([^<]+)<\/token>/)?.[1];
   const sign  = xml.match(/<sign>([^<]+)<\/sign>/)?.[1];
 
-  if (!token) throw new Error("No se pudo obtener token. Respuesta: " + xml.substring(0, 300));
+  if (!token) throw new Error("No se pudo obtener token. Respuesta: " + xml.substring(0, 2000));
 
   cachedToken = token;
   cachedSign  = sign;
