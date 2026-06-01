@@ -184,10 +184,13 @@ app.post("/emitir", async (req, res) => {
   </soapenv:Body>
 </soapenv:Envelope>`;
 
-    const resp = await axios.post(WSFE_URL, soap, {
+const https = require("https");
+const agente = new https.Agent({ securityLevel: 0 });
+const resp = await axios.post(WSFE_URL, soap, {
+      httpsAgent: agente,
       headers: {
         "Content-Type": "text/xml; charset=utf-8",
-        "SOAPAction": "http://ar.gov.afip.dif.FEV1/FECAESolicitar"
+        "SOAPAction": "http://ar.gov.afip.dif.FEV1/FECompUltimoAutorizado"
       }
     });
 
