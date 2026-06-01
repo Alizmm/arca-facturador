@@ -10,7 +10,11 @@ const CERT_B64 = process.env.CERT_B64 || "";
 const KEY_B64  = process.env.KEY_B64  || "";
 const WSAA_URL = "https://wsaa.afip.gov.ar/ws/services/LoginCms";
 const WSFE_URL = "https://servicios1.afip.gov.ar/wsfev1/service.asmx";
-const agente   = new https.Agent({ securityLevel: 0, rejectUnauthorized: false });
+const crypto = require("crypto");
+const agente = new https.Agent({ 
+  rejectUnauthorized: false,
+  secureOptions: crypto.constants.SSL_OP_LEGACY_SERVER_CONNECT
+});
 
 let cachedToken = null;
 let cachedSign  = null;
