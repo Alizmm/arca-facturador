@@ -50,6 +50,10 @@ function firmarTRA(traXml) {
   return Buffer.from(der, "binary").toString("base64");
 }
 
+function formatFecha(d) {
+  const pad = n => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}-03:00`;
+}
 async function obtenerToken() {
   const ahora = new Date();
   if (cachedToken && tokenExpira && ahora < tokenExpira) {
@@ -63,8 +67,8 @@ async function obtenerToken() {
 <loginTicketRequest version="1.0">
   <header>
     <uniqueId>${uniqueId}</uniqueId>
-    <generationTime>${ahora.toISOString().replace(/\.\d{3}Z$/, "-03:00")}</generationTime>
-    <expirationTime>${expira.toISOString().replace(/\.\d{3}Z$/, "-03:00")}</expirationTime>
+    <generationTime>${formatFecha(ahora)}</generationTime>
+    <expirationTime>${formatFecha(expira)}</expirationTime>
   </header>
   <service>wsfe</service>
 </loginTicketRequest>`;
