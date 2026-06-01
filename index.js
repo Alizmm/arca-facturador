@@ -1,4 +1,6 @@
 const express = require("express");
+const https = require("https");
+const agenteInseguro = new https.Agent({ securityLevel: 0, rejectUnauthorized: false });
 const forge = require("node-forge");
 const axios = require("axios");
 const app = express();
@@ -50,9 +52,6 @@ function firmarTRA(traXml) {
   return Buffer.from(der, "binary").toString("base64");
 }
 
-function formatFecha(d) {
-  return d.toISOString().replace(/\.\d{3}Z$/, "-00:00");
-}
 async function obtenerToken() {
   const ahora = new Date();
   if (cachedToken && tokenExpira && ahora < tokenExpira) {
@@ -66,8 +65,8 @@ async function obtenerToken() {
 <loginTicketRequest version="1.0">
   <header>
     <uniqueId>${uniqueId}</uniqueId>
-    <generationTime>${formatFecha(ahora)}</generationTime>
-    <expirationTime>${formatFecha(expira)}</expirationTime>
+    <generationTime>${ahora.toISOString().replace(/\.\d{3}Z$/, "-03:00")}</generationTime>
+    <expirationTime>${expira.toISOString().replace(/\.\d{3}Z$/, "-03:00")}</expirationTime>
   </header>
   <service>wsfe</service>
 </loginTicketRequest>`;
@@ -85,16 +84,17 @@ async function obtenerToken() {
 
   const resp = await axios.post(WSAA_URL, soap, {
     headers: { "Content-Type": "text/xml; charset=utf-8", "SOAPAction": "" },
-    validateStatus: () => true
+    httpsAgent: agenteInseguro,
+    validateStatus: () => true,
+    httpsAgent: agenteInseguro
   });
 
   console.log("Status WSAA:", resp.status);
   const xml = typeof resp.data === "string" ? resp.data : JSON.stringify(resp.data);
   console.log("Respuesta WSAA:", xml.substring(0, 400));
 
-const unescaped = xml.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"');
-const token = unescaped.match(/<token>([^<]+)<\/token>/)?.[1];
-const sign  = unescaped.match(/<sign>([^<]+)<\/sign>/)?.[1];
+  const token = xml.match(/<token>([^<]+)<\/token>/)?.[1];
+  const sign  = xml.match(/<sign>([^<]+)<\/sign>/)?.[1];
 
   if (!token) throw new Error("No se pudo obtener token. Respuesta: " + xml.substring(0, 500));
 
@@ -130,7 +130,8 @@ app.get("/ultimo-numero", async (req, res) => {
       headers: {
         "Content-Type": "text/xml; charset=utf-8",
         "SOAPAction": "http://ar.gov.afip.dif.FEV1/FECompUltimoAutorizado"
-      }
+      },
+      httpsAgent: agenteInseguro
     });
 
     const nro = resp.data.match(/<CbteNro>([^<]+)<\/CbteNro>/)?.[1] || "0";
@@ -184,14 +185,12 @@ app.post("/emitir", async (req, res) => {
   </soapenv:Body>
 </soapenv:Envelope>`;
 
-const https = require("https");
-const agente = new https.Agent({ securityLevel: 0 });
-const resp = await axios.post(WSFE_URL, soap, {
-      httpsAgent: agente,
+    const resp = await axios.post(WSFE_URL, soap, {
       headers: {
         "Content-Type": "text/xml; charset=utf-8",
-        "SOAPAction": "http://ar.gov.afip.dif.FEV1/FECompUltimoAutorizado"
-      }
+        "SOAPAction": "http://ar.gov.afip.dif.FEV1/FECAESolicitar"
+      },
+      httpsAgent: agenteInseguro
     });
 
     const xml       = resp.data;
