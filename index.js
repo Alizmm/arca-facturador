@@ -92,8 +92,9 @@ async function obtenerToken() {
   const xml = typeof resp.data === "string" ? resp.data : JSON.stringify(resp.data);
   console.log("Respuesta WSAA:", xml.substring(0, 400));
 
-  const token = xml.match(/<token>([^<]+)<\/token>/)?.[1];
-  const sign  = xml.match(/<sign>([^<]+)<\/sign>/)?.[1];
+const unescaped = xml.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"');
+const token = unescaped.match(/<token>([^<]+)<\/token>/)?.[1];
+const sign  = unescaped.match(/<sign>([^<]+)<\/sign>/)?.[1];
 
   if (!token) throw new Error("No se pudo obtener token. Respuesta: " + xml.substring(0, 500));
 
