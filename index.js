@@ -1,6 +1,5 @@
 const express = require("express");
 const https = require("https");
-const agenteInseguro = new https.Agent({ securityLevel: 0, rejectUnauthorized: false });
 const forge = require("node-forge");
 const axios = require("axios");
 const app = express();
@@ -11,28 +10,30 @@ const CERT_B64 = process.env.CERT_B64 || "";
 const KEY_B64  = process.env.KEY_B64  || "";
 const WSAA_URL = "https://wsaa.afip.gov.ar/ws/services/LoginCms";
 const WSFE_URL = "https://servicios1.afip.gov.ar/wsfev1/service.asmx";
+const agente   = new https.Agent({ securityLevel: 0, rejectUnauthorized: false });
 
 let cachedToken = null;
 let cachedSign  = null;
 let tokenExpira = null;
 
-function getCertAndKey() {
-  // Los valores son DER en base64 — los convertimos a PEM
-  const certDer = Buffer.from(CERT_B64, "base64");
-  const keyDer  = Buffer.from(KEY_B64,  "base64");
+function formatFecha(d) {
+  const ar  = new Date(d.getTime() - 3 * 60 * 60 * 1000);
+  const pad = n => String(n).padStart(2, "0");
+  return `${ar.getFullYear()}-${pad(ar.getMonth()+1)}-${pad(ar.getDate())}T${pad(ar.getHours())}:${pad(ar.getMinutes())}:${pad(ar.getSeconds())}-03:00`;
+}
 
+function getCertAndKey() {
+  const certDer  = Buffer.from(CERT_B64, "base64");
+  const keyDer   = Buffer.from(KEY_B64,  "base64");
   const certAsn1 = forge.asn1.fromDer(forge.util.createBuffer(certDer));
   const cert     = forge.pki.certificateFromAsn1(certAsn1);
-
   const keyAsn1  = forge.asn1.fromDer(forge.util.createBuffer(keyDer));
   const privKey  = forge.pki.privateKeyFromAsn1(keyAsn1);
-
   return { cert, privKey };
 }
 
 function firmarTRA(traXml) {
   const { cert, privKey } = getCertAndKey();
-
   const p7 = forge.pkcs7.createSignedData();
   p7.content = forge.util.createBuffer(traXml, "utf8");
   p7.addCertificate(cert);
@@ -47,7 +48,6 @@ function firmarTRA(traXml) {
     ]
   });
   p7.sign();
-
   const der = forge.asn1.toDer(p7.toAsn1()).getBytes();
   return Buffer.from(der, "binary").toString("base64");
 }
@@ -65,8 +65,8 @@ async function obtenerToken() {
 <loginTicketRequest version="1.0">
   <header>
     <uniqueId>${uniqueId}</uniqueId>
-    <generationTime>${ahora.toISOString().replace(/\.\d{3}Z$/, "-03:00")}</generationTime>
-    <expirationTime>${expira.toISOString().replace(/\.\d{3}Z$/, "-03:00")}</expirationTime>
+    <generationTime>${formatFecha(ahora)}</generationTime>
+    <expirationTime>${formatFecha(expira)}</expirationTime>
   </header>
   <service>wsfe</service>
 </loginTicketRequest>`;
@@ -83,18 +83,15 @@ async function obtenerToken() {
 </soapenv:Envelope>`;
 
   const resp = await axios.post(WSAA_URL, soap, {
+    httpsAgent: agente,
     headers: { "Content-Type": "text/xml; charset=utf-8", "SOAPAction": "" },
-    httpsAgent: agenteInseguro,
-    validateStatus: () => true,
-    httpsAgent: agenteInseguro
+    validateStatus: () => true
   });
 
-  console.log("Status WSAA:", resp.status);
-  const xml = typeof resp.data === "string" ? resp.data : JSON.stringify(resp.data);
-  console.log("Respuesta WSAA:", xml.substring(0, 400));
-
-  const token = xml.match(/<token>([^<]+)<\/token>/)?.[1];
-  const sign  = xml.match(/<sign>([^<]+)<\/sign>/)?.[1];
+  const xml       = typeof resp.data === "string" ? resp.data : JSON.stringify(resp.data);
+  const unescaped = xml.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"');
+  const token     = unescaped.match(/<token>([^<]+)<\/token>/)?.[1];
+  const sign      = unescaped.match(/<sign>([^<]+)<\/sign>/)?.[1];
 
   if (!token) throw new Error("No se pudo obtener token. Respuesta: " + xml.substring(0, 500));
 
@@ -127,11 +124,11 @@ app.get("/ultimo-numero", async (req, res) => {
 </soapenv:Envelope>`;
 
     const resp = await axios.post(WSFE_URL, soap, {
+      httpsAgent: agente,
       headers: {
         "Content-Type": "text/xml; charset=utf-8",
         "SOAPAction": "http://ar.gov.afip.dif.FEV1/FECompUltimoAutorizado"
-      },
-      httpsAgent: agenteInseguro
+      }
     });
 
     const nro = resp.data.match(/<CbteNro>([^<]+)<\/CbteNro>/)?.[1] || "0";
@@ -186,11 +183,11 @@ app.post("/emitir", async (req, res) => {
 </soapenv:Envelope>`;
 
     const resp = await axios.post(WSFE_URL, soap, {
+      httpsAgent: agente,
       headers: {
         "Content-Type": "text/xml; charset=utf-8",
         "SOAPAction": "http://ar.gov.afip.dif.FEV1/FECAESolicitar"
-      },
-      httpsAgent: agenteInseguro
+      }
     });
 
     const xml       = resp.data;
