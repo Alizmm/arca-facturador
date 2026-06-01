@@ -51,8 +51,7 @@ function firmarTRA(traXml) {
 }
 
 function formatFecha(d) {
-  const pad = n => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}-03:00`;
+  return d.toISOString().replace(/\.\d{3}Z$/, "-00:00");
 }
 async function obtenerToken() {
   const ahora = new Date();
